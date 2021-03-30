@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+
+from work_queue import *
+
+import os
+import sys
+from pprint import pprint
+import re
+import operator
+import itertools
+
+def read_sequences():
+	sequences, ids = [], dict()
+	seq_file = open(sys.argv[1], "r")
+	for line in seq_file:
+		atgc = next(seq_file).strip()
+		sequences.append(atgc)
+		ids[atgc] = line[1:].strip()
+
+	close(seq_file)
+	return sequences, ids
+
+# Main
+def main():
+	if len(sys.argv) < 2:
+		print("Usage: ")
+		print("./workeralign <file>")
+		sys.exit(1)
+
+	try:
+		q = WorkQueue(port = [9000,9100], debug_log = "align.debug.log")
+		q.specify_name("pbald-workeralign")
+	except:
+		print("Instatiation of Work Queue failed.")
+		sys.exit(1)
+
+	print(f"Listening on port {q.port}...")
+	
+	sequences, ids = read_sequences()
+	scores = []
+
+	for v1, v2 in itertools.combinations(sequences, 2):
+			
+			s1, s2 = ids[v1], ids[v2]
+
+			# create task to compare sequences
+			command = f"./swaligntool {v1} {v2}"
+			t = Task(command)
+			t.specify_file("swaligntool", "swaligntool", WORK_QUEUE_INPUT, cache = True)
+			t.specify_file("swalign", "swalign", WORK_QUEUE_INPUT, cache = True)
+			t.specify_tag(f"{s1} {s2}")
+
+			taskid = q.submit(t)
+			print(f"Submitted task {taskid} {t.tag}")
+
+	while not q.empty():
+		t = q.wait(5)
+		if t: # task complete
+			print(f"task (id# {t.id}) complete: {t.tag} {t.return_status}")
+			if t.return_status != 0:
+				None
+		
+			# Parse task output and add to scores list
+			score = re.search("Score: \d*", str(t.output))
+			scores.append((int(score.group()[7:]), t.tag.split()[0], t.tag.split()[1]))
+		
+	print("All tasks complete!")
+
+	# Print top ten scores
+	print("Top Ten Matches: ")
+	scores.sort(key = operator.itemgetter(0), reverse = True)
+	for i in range(10):
+		print(f"{i+1}: sequence {scores[i][1]} matches {scores[i][2]} with a score of {scores[i][0]}")
+
+if __name__ == '__main__':
+	main()
+
+	
